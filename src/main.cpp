@@ -8,6 +8,7 @@
 
 #include <NetworkClientSecure.h>
 #include <ArduinoJson.h>
+#include "esp_sntp.h"
 
 // #undef DISPLAY
 #ifdef WIRELESS_PAPER
@@ -25,8 +26,6 @@ EInkDisplay_WirelessPaperV1_2 display;
 #define CHAR_HEIGHT (7 * FONT_SIZE)
 #define SCREEN_WIDTH 250
 #define SCREEN_HEIGHT 122
-
-const int REFRESH_S = 60;
 
 #define DRYRUN false
 #if (DRYRUN)
@@ -91,13 +90,25 @@ bool is_(JsonObject input, const char *key, const char *value)
   return (strncmp(input[key], value, strlen(value)) == 0);
 }
 
+void copy_time_to_last(Bin &bin)
+{
+  bin.time_info_last = bin.time_info;
+}
+
+void ignore_hr_min_sec(struct tm &info)
+{
+  info.tm_hour = 0;
+  info.tm_min = 0;
+  info.tm_sec = 0;
+}
+
 void convert_string_to_time(Bin &bin)
 {
+  copy_time_to_last(bin);
+
   strptime(bin.time_str.c_str(), "%Y-%m-%dT%T%z", &bin.time_info);
   // We don't care about the hour
-  bin.time_info.tm_hour = 0;
-  bin.time_info.tm_min = 0;
-  bin.time_info.tm_sec = 0;
+  ignore_hr_min_sec(bin.time_info);
 }
 
 void parseJson(JsonDocument doc, Bin &bin)
@@ -127,6 +138,31 @@ struct tm get_current_time()
   return timeinfo;
 }
 
+bool _is_today(struct tm to_test, int day_offset)
+{
+  struct tm now = get_current_time();
+  ignore_hr_min_sec(now);
+  ignore_hr_min_sec(to_test);
+
+  now.tm_mday += day_offset;
+
+  time_t now_s = mktime(&now);
+  time_t to_test_s = mktime(&to_test);
+
+  double diff = difftime(to_test_s,now_s);
+
+  return (-(60 * 60 * 24) < diff && diff < (60 * 60 * 24));
+}
+
+bool is_today(struct tm to_test)
+{
+  return _is_today(to_test,0);
+}
+
+bool is_tomorrow(struct tm to_test)
+{
+  return _is_today(to_test,1);
+}
 
 #if (DISPLAY)
 
@@ -181,7 +217,19 @@ void draw_main_screen(Bin &recycling_bin, Bin &food_bin, Bin &black_bin)
     snprintf(line_buf, sizeof(line_buf), " %s %s", days[recycling_bin.time_info.tm_wday], time_buf);
 
     display.setCursor(0, 57);
-    display.print(line_buf);
+
+    if (is_tomorrow(recycling_bin.time_info))
+    {
+      display.print("Tomorrow");
+    }
+    else if (is_today(recycling_bin.time_info))
+    {
+      display.print("Today");
+    }
+    else
+    {
+      display.print(line_buf);
+    }
   }
   else
   {
@@ -192,7 +240,18 @@ void draw_main_screen(Bin &recycling_bin, Bin &food_bin, Bin &black_bin)
     snprintf(line_buf, sizeof(line_buf), " %s %s", days[recycling_bin.time_info.tm_wday], time_buf);
 
     display.setCursor(0, 57);
-    display.print(line_buf);
+    if (is_tomorrow(recycling_bin.time_info))
+    {
+      display.print("Tomorrow");
+    }
+    else if (is_today(recycling_bin.time_info))
+    {
+      display.print("Today");
+    }
+    else
+    {
+      display.print(line_buf);
+    }
 
     display.setCursor(0, 75);
     display.print(black);
@@ -201,7 +260,18 @@ void draw_main_screen(Bin &recycling_bin, Bin &food_bin, Bin &black_bin)
     snprintf(line_buf, sizeof(line_buf), " %s %s", days[black_bin.time_info.tm_wday], time_buf);
 
     display.setCursor(0, 92);
-    display.print(line_buf);
+    if (is_tomorrow(black_bin.time_info))
+    {
+      display.print("Tomorrow");
+    }
+    else if (is_today(black_bin.time_info))
+    {
+      display.print("Today");
+    }
+    else
+    {
+      display.print(line_buf);
+    }
   }
 
   display.drawLine(1, 34, 250, 34, 0);
@@ -276,7 +346,7 @@ void setup()
   display.update();
 #endif
   setClock();
-
+  
 #else
   Serial.println(("DRYRUN"));
 #endif
@@ -311,13 +381,16 @@ void loop()
 
   if (ret != 0)
   {
-    Serial.println("Failed to get data");
+    draw_error_screen("Failed to get data");
+    delay(60*60*24*1000);
   }
 
   error = deserializeJson(doc, rawData);
   if (error)
   {
     Serial.printf("deserializeJson() failed: %s\n", error.f_str());
+    draw_error_screen("deserializeJson() failed");
+    delay(60*60*24*1000);
   }
 
   // Need to print errors to the display and do a retry
@@ -333,14 +406,19 @@ void loop()
   uint32_t to_midnight = seconds_to_midnight();
   Serial.printf("Next refresh in %is\n", to_midnight);
 
+
   // // Configure hardware for low-power
   // Platform::prepareToSleep();
+  // WiFi.disconnect(true);
+  // WiFi.mode(WIFI_OFF);
+  // esp_sntp_stop(); 
 
   // // How long until restart
   // esp_sleep_enable_timer_wakeup( (uint64_t)to_midnight * 1000 );
 
   // // Sleep now
   // esp_deep_sleep_start();
+  // // This doesn't work currently, basically just causes a reset instead of wakeup
 
   Serial.println();
   delay(to_midnight * 1000);

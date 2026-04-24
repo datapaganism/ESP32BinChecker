@@ -7,6 +7,7 @@ class Bin {
 
 public:
     String time_str;
+    struct tm time_info_last;
     struct tm time_info;
     const char* pretty_name;
     const char* key_name;
