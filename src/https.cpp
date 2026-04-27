@@ -2,8 +2,8 @@
 
 
 /*
-  Go Daddy Root Certificate Authority - G2
-  PEM (cert)
+    Go Daddy Root Certificate Authority - G2
+    PEM (cert)
 */
 const char* rootCACertificate = R"string_literal(
 -----BEGIN CERTIFICATE-----
