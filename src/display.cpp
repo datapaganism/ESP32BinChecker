@@ -143,5 +143,22 @@ void draw_error_screen(String error_string)
 
     display.update();
 }
-#include <ArduinoJson.h>
+
+void init_display()
+{
+    // display.setFont( & FreeMono9pt7b );
+    display.landscape();
+    display.clearMemory();
+    display.setTextSize(2);
+
+    display.setCursor(0, 0);
+    display.clearMemory();
+    display.update();
+}
+
+void turn_off_display()
+{
+    Platform::prepareToSleep();
+}
+
 #endif

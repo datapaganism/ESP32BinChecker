@@ -5,12 +5,18 @@
 #include <utils.hpp>
 #include <json.hpp>
 
-
 #include <WiFi.h>
 #include <WiFiMulti.h>
 
 #include <NetworkClientSecure.h>
 #include "esp_sntp.h"
+
+#define TZ "GMT0BST,M3.5.0/1,M10.5.0"
+#define _WIFI_TIMEOUT_S 10
+#define _CLOCK_TIMEOUT_S 60
+
+#define WIFI_TIMEOUT (_WIFI_TIMEOUT_S * 1000)
+#define CLOCK_TIMEOUT (_CLOCK_TIMEOUT_S * 1000)
 
 // #undef DISPLAY
 #ifdef WIRELESS_PAPER
@@ -35,45 +41,85 @@ EInkDisplay_WirelessPaperV1_2 display;
 const char *TESTJSON = "{\"@odata.context\":\"https://sgc-cp-prod.crm11.dynamics.com/api/data/v9.2/$metadata#hso_virtualserviceinformations\",\"value\":[{\"hso_statesource\":\"RoundLegInstance\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":144,\"hso_reason\":\"Outside time allowed\",\"hso_resolutionname\":null,\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T00:00:00+01:00\",\"hso_servicename\":\"Refuse\",\"hso_lastcollection\":\"2026-03-30T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every other week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":null,\"hso_lastcollectioncompleted\":\"2026-03-30T11:49:39+01:00\",\"hso_round\":\"CR 07 Mon B\",\"hso_statename\":\"Closed Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX144\",\"hso_roundgroup\":\"Refuse CR 07\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":146,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Recycling\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:31+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX146\",\"hso_roundgroup\":\"Recycling CK 18\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":148,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Food\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:39+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX148\",\"hso_roundgroup\":\"Recycling CK 18\"}]}";
 #endif
 
-
-// Not sure if NetworkClientSecure checks the validity date of the certificate.
-// Setting clock just to be sure...
-void setClock()
+int setup_clock()
 {
-    configTime(0, 0, "pool.ntp.org");
+    configTzTime(TZ, "pool.ntp.org");
+    const uint64_t timeout = millis() + CLOCK_TIMEOUT;
 
     Serial.print(F("Waiting for NTP time sync: "));
-    time_t nowSecs = time(nullptr);
-    while (nowSecs < 8 * 3600 * 2)
+
+    sntp_sync_status_t status = sntp_get_sync_status();
+
+    if ((status == SNTP_SYNC_STATUS_RESET))
     {
-        delay(500);
-        Serial.print(F("."));
-        yield();
-        nowSecs = time(nullptr);
+        while ((status == SNTP_SYNC_STATUS_RESET) && (millis() < timeout))
+        {
+            status = sntp_get_sync_status();
+            Serial.print(".");
+            delay(100);
+        }
     }
 
-    Serial.println();
-    struct tm timeinfo;
-    gmtime_r(&nowSecs, &timeinfo);
-    Serial.print(F("Current time: "));
-    char buf[26];
-    Serial.print(asctime_r(&timeinfo, buf));
+    if (status == SNTP_SYNC_STATUS_RESET)
+    {
+        return -1;
+    }
+    
+    Serial.println(" synced");
+    return 0;
 }
 
 WiFiMulti WiFiMulti;
 
-void setupWifi()
+int setup_wifi()
 {
     WiFi.mode(WIFI_STA);
     WiFiMulti.addAP(WIFI_SSID, WIFI_PSK);
 
+    const uint64_t timeout = millis() + WIFI_TIMEOUT;
+
     // wait for WiFi connection
-    Serial.print("Waiting for WiFi to connect...");
-    while ((WiFiMulti.run() != WL_CONNECTED))
+    Serial.print("Waiting for Wifi connection: ");
+    while ((WiFiMulti.run() != WL_CONNECTED) || millis() < timeout)
     {
+        delay(100);
         Serial.print(".");
     }
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("Wifi Timeout");
+        return -1;
+    }
+
     Serial.println(" connected");
+    return 0;
+}
+
+void turn_off_wifi()
+{
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+}
+
+void turn_off_clock()
+{
+    esp_sntp_stop();
+}
+
+void enter_deep_sleep(uint64_t time_s, uint64_t ms_offset = 0)
+{
+    time_s *= 1000000ULL;
+    ms_offset *= 1000ULL;
+
+    if (ms_offset > time_s)
+    {
+        ms_offset = 0;
+    }
+
+    esp_sleep_enable_timer_wakeup((uint64_t)time_s - ms_offset);
+    Serial.printf("Sleeping for %is\n", (time_s - ms_offset) / 1000000ULL);
+    esp_deep_sleep_start();
 }
 
 Bin black_bin("Refuse", "Black");
@@ -82,46 +128,37 @@ Bin food_bin("Food", "Food");
 
 void setup()
 {
-
-#if (DISPLAY)
-    // display.setFont( & FreeMono9pt7b );
-    display.landscape();
-    display.clearMemory();
-    display.setTextSize(2);
-#endif
-
     Serial.begin(115200);
 
-    Serial.println();
-    Serial.println();
-    Serial.println();
+    uint64_t boot_up_time_ms = millis();
 
-#if (!DRYRUN)
-#if (DISPLAY)
-    display.print("Waiting for Wifi\n");
-    display.update();
-#endif
-    setupWifi();
+    int wifi_ret = setup_wifi();
+    if (wifi_ret != 0)
+    {
+        init_display();
+        turn_off_wifi();
+        String error_msg = "Wifi failed to connect";
+        draw_error_screen(error_msg);
+        Serial.println(error_msg);
+        turn_off_display();
+        enter_deep_sleep(30);
+    }
 
-#if (DISPLAY)
-    display.print("Waiting for NTP Sync\n");
-    display.update();
-#endif
-    setClock();
+    int clock_ret = setup_clock();
+    if (clock_ret != 0)
+    {
+        init_display();
+        turn_off_clock();
+        turn_off_wifi();
+        String error_msg = "Clock failed to sync";
+        draw_error_screen(error_msg);
+        Serial.println(error_msg);
+        turn_off_display();
+        enter_deep_sleep(30);
+    }
 
-#else
-    Serial.println(("DRYRUN"));
-#endif
 
-#if (DISPLAY)
-    display.setCursor(0, 0);
-    display.clearMemory();
-    display.update();
-#endif
-}
 
-void loop()
-{
     int ret = 0;
     String rawData;
     JsonDocument doc;
@@ -133,53 +170,52 @@ void loop()
     char out_buf[200];
     size_t out_buf_index = 0;
 
-    nowSecs = time(nullptr);
-#if (!DRYRUN)
     ret = getData(rawData);
-#else
-    rawData = String(TESTJSON);
-#endif
-
     if (ret != 0)
     {
-        draw_error_screen("Failed to get data");
-        delay(60 * 60 * 24 * 1000);
+        init_display();
+        turn_off_clock();
+        turn_off_wifi();
+        String error_msg = "Failed to get data from API";
+        draw_error_screen(error_msg);
+        Serial.println(error_msg);
+        turn_off_display();
+        enter_deep_sleep(30);
     }
+
+    turn_off_wifi();
 
     error = deserializeJson(doc, rawData);
     if (error)
     {
-        Serial.printf("deserializeJson() failed: %s\n", error.f_str());
-        draw_error_screen("deserializeJson() failed");
-        delay(60 * 60 * 24 * 1000);
+        init_display();
+        turn_off_clock();
+        turn_off_wifi();
+        String error_msg = "Failed to deserialise json";
+        draw_error_screen(error_msg);
+        Serial.println(error_msg);
+        turn_off_display();
+        enter_deep_sleep(30);
     }
-
-    // Need to print errors to the display and do a retry
 
     parseJson(doc, black_bin);
     parseJson(doc, recycling_bin);
     parseJson(doc, food_bin);
 
-#if (DISPLAY)
+    init_display();
     draw_main_screen(recycling_bin, food_bin, black_bin);
-#endif
+    turn_off_display();
+
+    // We have Wifi and NTP sync now
+    boot_up_time_ms = millis() - boot_up_time_ms;
+    Serial.printf("boot up time %i\n", boot_up_time_ms);
 
     uint32_t to_midnight = seconds_to_midnight();
     Serial.printf("Next refresh in %is\n", to_midnight);
+    enter_deep_sleep(to_midnight, boot_up_time_ms);
+}
 
-    // // Configure hardware for low-power
-    // Platform::prepareToSleep();
-    // WiFi.disconnect(true);
-    // WiFi.mode(WIFI_OFF);
-    // esp_sntp_stop();
+void loop()
+{
 
-    // // How long until restart
-    // esp_sleep_enable_timer_wakeup( (uint64_t)to_midnight * 1000 );
-
-    // // Sleep now
-    // esp_deep_sleep_start();
-    // // This doesn't work currently, basically just causes a reset instead of wakeup
-
-    Serial.println();
-    delay(to_midnight * 1000);
 }
