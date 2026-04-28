@@ -13,10 +13,12 @@
 
 #define TZ "GMT0BST,M3.5.0/1,M10.5.0"
 #define _WIFI_TIMEOUT_S 10
-#define _CLOCK_TIMEOUT_S 60
+#define _CLOCK_TIMEOUT_S 120
 
 #define WIFI_TIMEOUT (_WIFI_TIMEOUT_S * 1000)
 #define CLOCK_TIMEOUT (_CLOCK_TIMEOUT_S * 1000)
+#define ERROR_SLEEP_S 30
+
 
 // #undef DISPLAY
 #ifdef WIRELESS_PAPER
@@ -40,6 +42,12 @@ EInkDisplay_WirelessPaperV1_2 display;
 // Removed potentially doxxable information
 const char *TESTJSON = "{\"@odata.context\":\"https://sgc-cp-prod.crm11.dynamics.com/api/data/v9.2/$metadata#hso_virtualserviceinformations\",\"value\":[{\"hso_statesource\":\"RoundLegInstance\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":144,\"hso_reason\":\"Outside time allowed\",\"hso_resolutionname\":null,\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T00:00:00+01:00\",\"hso_servicename\":\"Refuse\",\"hso_lastcollection\":\"2026-03-30T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every other week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":null,\"hso_lastcollectioncompleted\":\"2026-03-30T11:49:39+01:00\",\"hso_round\":\"CR 07 Mon B\",\"hso_statename\":\"Closed Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX144\",\"hso_roundgroup\":\"Refuse CR 07\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":146,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Recycling\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:31+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX146\",\"hso_roundgroup\":\"Recycling CK 18\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":148,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Food\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:39+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX148\",\"hso_roundgroup\":\"Recycling CK 18\"}]}";
 #endif
+
+
+WiFiMulti WiFiMulti;
+Bin black_bin("Refuse", "Black");
+Bin recycling_bin("Recycling", "Recycling");
+Bin food_bin("Food", "Food");
 
 int setup_clock()
 {
@@ -69,7 +77,6 @@ int setup_clock()
     return 0;
 }
 
-WiFiMulti WiFiMulti;
 
 int setup_wifi()
 {
@@ -122,9 +129,18 @@ void enter_deep_sleep(uint64_t time_s, uint64_t ms_offset = 0)
     esp_deep_sleep_start();
 }
 
-Bin black_bin("Refuse", "Black");
-Bin recycling_bin("Recycling", "Recycling");
-Bin food_bin("Food", "Food");
+
+
+static void on_error(String error_msg)
+{
+    init_display();
+    turn_off_clock();
+    turn_off_wifi();
+    draw_error_screen(error_msg);
+    Serial.println(error_msg);
+    turn_off_display();
+    enter_deep_sleep(ERROR_SLEEP_S);
+}
 
 void setup()
 {
@@ -135,29 +151,14 @@ void setup()
     int wifi_ret = setup_wifi();
     if (wifi_ret != 0)
     {
-        init_display();
-        turn_off_wifi();
-        String error_msg = "Wifi failed to connect";
-        draw_error_screen(error_msg);
-        Serial.println(error_msg);
-        turn_off_display();
-        enter_deep_sleep(30);
+        on_error("Wifi failed to connect");
     }
 
     int clock_ret = setup_clock();
     if (clock_ret != 0)
     {
-        init_display();
-        turn_off_clock();
-        turn_off_wifi();
-        String error_msg = "Clock failed to sync";
-        draw_error_screen(error_msg);
-        Serial.println(error_msg);
-        turn_off_display();
-        enter_deep_sleep(30);
+        on_error("Clock failed to sync");
     }
-
-
 
     int ret = 0;
     String rawData;
@@ -173,14 +174,7 @@ void setup()
     ret = getData(rawData);
     if (ret != 0)
     {
-        init_display();
-        turn_off_clock();
-        turn_off_wifi();
-        String error_msg = "Failed to get data from API";
-        draw_error_screen(error_msg);
-        Serial.println(error_msg);
-        turn_off_display();
-        enter_deep_sleep(30);
+        on_error("Failed to get data from API");
     }
 
     turn_off_wifi();
@@ -188,14 +182,7 @@ void setup()
     error = deserializeJson(doc, rawData);
     if (error)
     {
-        init_display();
-        turn_off_clock();
-        turn_off_wifi();
-        String error_msg = "Failed to deserialise json";
-        draw_error_screen(error_msg);
-        Serial.println(error_msg);
-        turn_off_display();
-        enter_deep_sleep(30);
+        on_error("Failed to deserialise json");
     }
 
     parseJson(doc, black_bin);
@@ -212,7 +199,7 @@ void setup()
 
     uint32_t to_midnight = seconds_to_midnight();
     Serial.printf("Next refresh in %is\n", to_midnight);
-    enter_deep_sleep(to_midnight, boot_up_time_ms);
+    enter_deep_sleep(to_midnight);
 }
 
 void loop()

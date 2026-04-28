@@ -16,13 +16,20 @@ const char *days[] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "S
 void draw_last_updated_batt()
 {
     char time_buf[25];
-    char buf[25];
+    char buf[30];
+    size_t buf_index = 0;
 
+    // Dummy value
     int bat = 100;
 
     struct tm time_now = get_current_time();
     strftime((char *)&time_buf, sizeof(time_buf), "%T", &time_now);
-    sniprintf(buf, sizeof(buf), "LU:%s BAT:%i% ", time_buf, bat);
+
+    buf_index += sniprintf(buf + buf_index, sizeof(buf) - buf_index, "LU:%s ", time_buf);
+    
+#if (BATTERY)
+    buf_index += sniprintf(buf + buf_index, sizeof(buf) - buf_index, "BAT:%ipc ", bat);
+#endif
 
     display.setTextSize(1);
     display.setCursor(0, 115);

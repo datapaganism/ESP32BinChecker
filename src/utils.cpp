@@ -7,8 +7,8 @@ uint32_t seconds_to_midnight()
     struct tm to_midnight;
     double diff;
 
-    now = time(NULL);
-    to_midnight = *localtime(&now);
+    now = time(nullptr);
+    localtime_r(&now, &to_midnight);
 
     to_midnight.tm_hour = 0;
     to_midnight.tm_min = 0;
@@ -50,7 +50,7 @@ struct tm get_current_time()
 {
     time_t now_secs = time(nullptr);
     struct tm timeinfo;
-    gmtime_r(&now_secs, &timeinfo);
+    localtime_r(&now_secs, &timeinfo);
 
     return timeinfo;
 }
