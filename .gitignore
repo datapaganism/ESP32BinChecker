@@ -5,3 +5,4 @@
 .vscode/ipch
 .vscode
 config/secret.ini
+src/idf_component.yml
