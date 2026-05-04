@@ -1,6 +1,7 @@
 #include "display.hpp"
 
 #include "utils.hpp"
+#include "battery.hpp"
 
 #include <heltec-eink-modules.h>
 // #include "Fonts/FreeMono9pt7b.h"
@@ -19,16 +20,14 @@ void draw_last_updated_batt()
     char buf[30];
     size_t buf_index = 0;
 
-    // Dummy value
-    int bat = 100;
-
     struct tm time_now = get_current_time();
     strftime((char *)&time_buf, sizeof(time_buf), "%T", &time_now);
 
     buf_index += sniprintf(buf + buf_index, sizeof(buf) - buf_index, "LU:%s ", time_buf);
     
 #if (BATTERY)
-    buf_index += sniprintf(buf + buf_index, sizeof(buf) - buf_index, "BAT:%ipc ", bat);
+    // printf doesn't seem to support floats, convert back to milivolts
+    buf_index += sniprintf(buf + buf_index, sizeof(buf) - buf_index, "BAT:%3i%% (%imV)", (int)get_battery_pc(), (int)(get_battery_voltage()*1000));
 #endif
 
     display.setTextSize(1);

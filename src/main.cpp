@@ -43,11 +43,17 @@ EInkDisplay_WirelessPaperV1_2 display;
 const char *TESTJSON = "{\"@odata.context\":\"https://sgc-cp-prod.crm11.dynamics.com/api/data/v9.2/$metadata#hso_virtualserviceinformations\",\"value\":[{\"hso_statesource\":\"RoundLegInstance\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":144,\"hso_reason\":\"Outside time allowed\",\"hso_resolutionname\":null,\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T00:00:00+01:00\",\"hso_servicename\":\"Refuse\",\"hso_lastcollection\":\"2026-03-30T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every other week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":null,\"hso_lastcollectioncompleted\":\"2026-03-30T11:49:39+01:00\",\"hso_round\":\"CR 07 Mon B\",\"hso_statename\":\"Closed Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX144\",\"hso_roundgroup\":\"Refuse CR 07\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":146,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Recycling\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:31+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX146\",\"hso_roundgroup\":\"Recycling CK 18\"},{\"hso_statesource\":\"Task\",\"hso_roundleg\":\"XXX\",\"hso_uprn\":\"XXX\",\"hso_serviceid\":148,\"hso_reason\":\"Unable to complete - container / Item not presented\",\"hso_resolutionname\":\"Bin / Item Not Out\",\"hso_subscriptionenddate\":null,\"hso_nextcollection\":\"2026-04-13T07:00:00+01:00\",\"hso_servicename\":\"Food\",\"hso_lastcollection\":\"2026-04-06T07:00:00+01:00\",\"hso_scheduledescription\":\"Monday every week\",\"hso_name\":\"XXX\",\"hso_nextcollectiondate\":null,\"hso_missedcollectionallowed\":false,\"hso_lastcollectiondate\":null,\"hso_resolutionsource\":\"Task\",\"hso_lastcollectioncompleted\":\"2026-04-06T09:03:39+01:00\",\"hso_round\":\"CK 18 Mon\",\"hso_statename\":\"Closed Not Completed\",\"hso_lastcollectioncompleteddate\":null,\"hso_virtualserviceinformationid\":\"00000000-0000-0000-0000-000XXX148\",\"hso_roundgroup\":\"Recycling CK 18\"}]}";
 #endif
 
+#if (BATTERY)
+#include "battery.hpp"
+#endif
+
 
 WiFiMulti WiFiMulti;
 Bin black_bin("Refuse", "Black");
 Bin recycling_bin("Recycling", "Recycling");
 Bin food_bin("Food", "Food");
+bool clock_setup = false;
+bool wifi_setup = false;
 
 int setup_clock()
 {
@@ -70,10 +76,12 @@ int setup_clock()
 
     if (status == SNTP_SYNC_STATUS_RESET)
     {
+        clock_setup = false;
         return -1;
     }
     
     Serial.println(" synced");
+    clock_setup = true;
     return 0;
 }
 
@@ -96,22 +104,32 @@ int setup_wifi()
     if (WiFi.status() != WL_CONNECTED)
     {
         Serial.println("Wifi Timeout");
+        wifi_setup = false;
         return -1;
     }
 
     Serial.println(" connected");
+    wifi_setup = true;
     return 0;
 }
 
 void turn_off_wifi()
 {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    if (wifi_setup)
+    {
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        wifi_setup = false;
+    }
 }
 
 void turn_off_clock()
 {
-    esp_sntp_stop();
+    if (clock_setup)
+    {
+        esp_sntp_stop();
+        clock_setup = false;
+    }
 }
 
 void enter_deep_sleep(uint64_t time_s, uint64_t ms_offset = 0)
@@ -131,23 +149,32 @@ void enter_deep_sleep(uint64_t time_s, uint64_t ms_offset = 0)
 
 
 
-static void on_error(String error_msg)
+static void on_error(String error_msg, uint64_t sleep_time = ERROR_SLEEP_S)
 {
     init_display();
-    turn_off_clock();
     turn_off_wifi();
+    turn_off_clock();
     draw_error_screen(error_msg);
     Serial.println(error_msg);
     turn_off_display();
-    enter_deep_sleep(ERROR_SLEEP_S);
+    enter_deep_sleep(sleep_time);
 }
 
 void setup()
 {
-    Serial.begin(115200);
-
     uint64_t boot_up_time_ms = millis();
 
+    Serial.begin(115200);
+
+#if (BATTERY)
+    battery_gpio_setup();
+
+    if (get_battery_voltage() < LOW_BAT_VOLTAGE)
+    {
+        on_error("Battery low",LOW_BAT_SLEEP_S);
+    }
+
+#endif
     int wifi_ret = setup_wifi();
     if (wifi_ret != 0)
     {
