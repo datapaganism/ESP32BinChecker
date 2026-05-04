@@ -2,21 +2,22 @@
 
 uint32_t seconds_to_midnight()
 {
-    time_t now;
-    time_t midnight;
+    time_t now_s;
+    time_t midnight_s;
+    struct tm now;
     struct tm to_midnight;
     double diff;
-
-    now = time(nullptr);
-    localtime_r(&now, &to_midnight);
-
+    
+    now = get_current_time();
+    to_midnight = now;
     to_midnight.tm_hour = 0;
     to_midnight.tm_min = 0;
     to_midnight.tm_sec = 0;
     to_midnight.tm_mday += 1;
 
-    midnight = mktime(&to_midnight);
-    diff = difftime(midnight, now);
+    now_s = mktime(&now);
+    midnight_s = mktime(&to_midnight);
+    diff = difftime(midnight_s, now_s);
     return uint32_t(diff);
 }
 
