@@ -173,8 +173,13 @@ void setup()
     {
         on_error("Battery low",LOW_BAT_SLEEP_S);
     }
-
 #endif
+
+#if (SPLASH)
+    init_display();
+    draw_splash_screen();
+#endif
+
     int wifi_ret = setup_wifi();
     if (wifi_ret != 0)
     {
