@@ -84,11 +84,11 @@ void draw_main_screen(Bin &recycling_bin, Bin &food_bin, Bin &black_bin)
 
         if (is_tomorrow(recycling_bin.time_info))
         {
-            display.print("Tomorrow");
+            display.print(" Tomorrow");
         }
         else if (is_today(recycling_bin.time_info))
         {
-            display.print("Today");
+            display.print(" Today");
         }
         else
         {
